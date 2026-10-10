@@ -1,0 +1,13 @@
+# dslrcam settings — installed to ~/.config/dslrcam/config (read by dslrcam and dslrcam-watch).
+
+# Which camera to use: case-insensitive substring of the model name printed by `gphoto2 --auto-detect`,
+# e.g. "EOS R50" or "Nikon Z". Empty = first detected camera.
+CAMERA_MODEL=""
+
+# Canon EOS only: live view size (Large / Medium / Small). Large = 1024x576 on the EOS R50.
+# Ignored by cameras that don't have this setting.
+LIVEVIEW_SIZE="Large"
+
+# Auto-start only for these USB vendor IDs (hex, space separated). Empty = any PTP camera except Apple devices.
+# Canon 04a9, Nikon 04b0, Sony 054c, Fujifilm 04cb, Panasonic 04da, Olympus 07b4
+USB_VENDOR_IDS=""

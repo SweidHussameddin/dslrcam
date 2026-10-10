@@ -4,10 +4,10 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>local.r50cam-watch</string>
+    <string>local.dslrcam-watch</string>
     <key>ProgramArguments</key>
     <array>
-        <string>__HOME__/.local/bin/r50cam-watch</string>
+        <string>__HOME__/.local/bin/dslrcam-watch</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>
@@ -21,8 +21,8 @@
     <key>ProcessType</key>
     <string>Interactive</string>
     <key>StandardOutPath</key>
-    <string>/tmp/r50cam-watch.log</string>
+    <string>/tmp/dslrcam-watch.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/r50cam-watch.log</string>
+    <string>/tmp/dslrcam-watch.log</string>
 </dict>
 </plist>

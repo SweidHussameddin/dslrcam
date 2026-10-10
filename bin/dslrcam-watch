@@ -1,0 +1,50 @@
+#!/bin/zsh
+# dslrcam-watch — keeps dslrcam running while a camera is connected and switched on,
+# and stops it (incl. OBS) when the camera is unplugged or turned off.
+# Run by launchd: ~/Library/LaunchAgents/local.dslrcam-watch.plist (toggle with `dslrcam enable|disable`).
+set -u
+
+BIN=${0:A:h}
+USB_VENDOR_IDS=""
+CONFIG=~/.config/dslrcam/config
+[[ -f $CONFIG ]] && source $CONFIG
+
+# Vendor IDs as decimal (ioreg prints decimal); Apple (0x05ac) is always ignored so iPhones don't trigger it.
+want_vendors=""
+for v in ${=USB_VENDOR_IDS}; do want_vendors+="$(( 16#${v#0x} )),"; done
+
+# A camera = a USB interface of class 6 (Still Image / PTP) from a non-Apple vendor (or one of USB_VENDOR_IDS).
+camera_present() {
+  ioreg -r -c IOUSBHostInterface -l -w0 | awk -v want="$want_vendors" '
+    function check() { if (cls == 6 && vid != "" && vid != 1452 && (want == "" || index("," want, "," vid ","))) found = 1 }
+    /^\+-o / { check(); cls = ""; vid = "" }
+    /^[ |]*"bInterfaceClass" = / && cls == "" { cls = $NF }
+    /^[ |]*"idVendor" = / && vid == "" { vid = $NF }
+    END { check(); exit !found }'
+}
+dslrcam_running() { pgrep -f 'bin/dslrcam$' >/dev/null; }
+log() { echo "$(date '+%F %T') $*"; }
+
+pid=""
+unsupported=0  # set when dslrcam exits 2 (no USB live view); cleared when the device is unplugged
+while true; do
+  if [[ -n $pid ]] && ! kill -0 $pid 2>/dev/null; then
+    wait $pid; rc=$?; pid=""
+    (( rc == 2 )) && { unsupported=1; log "camera has no USB live view — ignoring it until it's reconnected"; }
+  fi
+
+  if camera_present; then
+    if (( ! unsupported )) && ! dslrcam_running; then
+      log "camera connected → starting dslrcam"
+      "$BIN/dslrcam" >>/tmp/dslrcam.out 2>&1 &
+      pid=$!
+    fi
+  else
+    unsupported=0
+    if dslrcam_running; then
+      log "camera gone → stopping dslrcam"
+      "$BIN/dslrcam" stop
+    fi
+  fi
+  sleep 3
+done

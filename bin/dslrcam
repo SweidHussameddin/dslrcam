@@ -1,0 +1,111 @@
+#!/bin/zsh
+# dslrcam — use a DSLR / mirrorless camera as a macOS webcam over USB, no vendor webcam app.
+# gphoto2 USB live view (MJPEG) → raw MJPEG over local TCP → OBS media source (scaled to 1080p) → OBS Virtual Camera.
+# No re-encode: MJPEG straight into OBS is ~1 s lower latency than an H.264/UDP pipeline.
+#
+# Usage: dslrcam          start (Ctrl-C stops everything)
+#        dslrcam stop     stop a running instance (auto-start restarts it while the camera is connected)
+#        dslrcam enable   auto-start whenever a camera is plugged in and on (LaunchAgent dslrcam-watch)
+#        dslrcam disable  turn auto-start off and stop the stream
+#        dslrcam detect   show which camera would be used
+#
+# Exit codes: 1 = no camera / missing deps, 2 = camera found but no USB live view (unsupported).
+# Settings: ~/.config/dslrcam/config (see config.example).
+set -u
+
+TCP_PORT=23050  # must match the OBS media source input (obs/dslrcam.json)
+LOG=/tmp/dslrcam.log
+AGENT=local.dslrcam-watch
+AGENT_PLIST=~/Library/LaunchAgents/$AGENT.plist
+
+CAMERA_MODEL=""
+LIVEVIEW_SIZE="Large"
+CONFIG=~/.config/dslrcam/config
+[[ -f $CONFIG ]] && source $CONFIG
+
+stop_all() {
+  pkill -f 'gphoto2 .*--capture-movie' 2>/dev/null
+  pkill -f "nc 127.0.0.1 $TCP_PORT" 2>/dev/null
+  quit_obs
+}
+
+# OBS only honours its launch flags (--startvirtualcam etc.) on a fresh start.
+quit_obs() {
+  # AppleScript "quit" gets cancelled by OBS when minimized to tray; SIGTERM shuts it down cleanly.
+  pkill -x OBS 2>/dev/null || return 0
+  for _ in {1..20}; do pgrep -x OBS >/dev/null || return 0; sleep 0.25; done
+  pkill -9 -x OBS
+}
+
+# macOS's PTP daemon (and vendor webcam utilities) grab the camera exclusively.
+release_camera() { pkill -x ptpcamerad 2>/dev/null; }
+
+# Sets CAM_MODEL / CAM_PORT from `gphoto2 --auto-detect` (first match of CAMERA_MODEL, Apple devices skipped).
+detect_camera() {
+  local line
+  line=$(gphoto2 --auto-detect 2>/dev/null | tail -n +3 | grep -v -i '^apple' | grep -i -F -- "$CAMERA_MODEL" | head -1)
+  [[ -n $line ]] || return 1
+  CAM_PORT=$(print -r -- "$line" | grep -oE 'usb:[0-9,]+$')
+  CAM_MODEL=$(print -r -- "$line" | sed -E 's/[[:space:]]+usb:[0-9,]+$//')
+  [[ -n $CAM_PORT && -n $CAM_MODEL ]]
+}
+
+gp() { gphoto2 --camera "$CAM_MODEL" --port "$CAM_PORT" "$@"; }
+
+case ${1:-} in
+  stop)
+    pkill -f 'bin/dslrcam$' 2>/dev/null
+    stop_all
+    exit 0 ;;
+  disable)
+    launchctl bootout gui/$UID/$AGENT 2>/dev/null
+    pkill -f 'bin/dslrcam$' 2>/dev/null
+    stop_all
+    echo "auto-start disabled"
+    exit 0 ;;
+  enable)
+    launchctl bootstrap gui/$UID $AGENT_PLIST 2>/dev/null || launchctl kickstart gui/$UID/$AGENT
+    echo "auto-start enabled — dslrcam starts whenever the camera is plugged in and on"
+    exit 0 ;;
+  detect)
+    command -v gphoto2 >/dev/null || { echo "gphoto2 missing: brew install gphoto2"; exit 1; }
+    release_camera; sleep 0.5
+    detect_camera && echo "$CAM_MODEL ($CAM_PORT)" || { echo "no camera detected"; exit 1; }
+    exit 0 ;;
+  "") ;;
+  *) sed -n '6,10p' ${0:A}; exit 1 ;;
+esac
+
+command -v gphoto2 >/dev/null || { echo "gphoto2 missing: brew install gphoto2"; exit 1; }
+
+release_camera
+sleep 0.5
+detect_camera || { echo "no camera detected — USB cable connected, camera on? (CAMERA_MODEL=${CAMERA_MODEL:-any})"; exit 1; }
+echo "camera: $CAM_MODEL ($CAM_PORT)"
+
+# Canon: pick the largest live view size. Other brands don't have this setting — ignore failure.
+[[ -n $LIVEVIEW_SIZE ]] && gp --set-config liveviewsize="$LIVEVIEW_SIZE" >/dev/null 2>&1
+
+# Preflight before launching OBS: does this camera deliver USB live view at all?
+if (( $(gp --capture-movie=2s --stdout 2>>"$LOG" | head -c 65536 | wc -c) < 65536 )); then
+  echo "$CAM_MODEL: no live view over USB (gphoto2 --capture-movie) — camera not supported"
+  exit 2
+fi
+
+trap 'echo; echo "stopping dslrcam"; stop_all; exit 0' INT TERM
+
+quit_obs
+open -a OBS --args --collection dslrcam --profile dslrcam --startvirtualcam --minimize-to-tray --disable-updater --disable-shutdown-check
+# --startvirtualcam is unreliable on macOS (camera extension activates async), so also start it via obs-websocket.
+sleep 3
+"${0:A:h}/obs-vcam" start || echo "warning: could not start OBS Virtual Camera — start it from the OBS window"
+
+echo "dslrcam running → select 'OBS Virtual Camera' in your app. Ctrl-C to stop. Log: $LOG"
+while true; do
+  release_camera
+  detect_camera || { sleep 2; continue; }  # USB port can change after the camera sleeps/reconnects
+  # OBS's media source listens on tcp://127.0.0.1:$TCP_PORT (input_format mjpeg); nc fails fast if OBS isn't ready yet.
+  gp --capture-movie --stdout 2>>"$LOG" | nc 127.0.0.1 $TCP_PORT 2>>"$LOG"
+  echo "$(date '+%T') stream dropped, restarting…" | tee -a "$LOG"
+  sleep 2
+done

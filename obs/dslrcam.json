@@ -1,8 +1,8 @@
 {
-    "name": "r50cam",
-    "current_scene": "R50",
-    "current_program_scene": "R50",
-    "scene_order": [{"name": "R50"}],
+    "name": "dslrcam",
+    "current_scene": "Camera",
+    "current_program_scene": "Camera",
+    "scene_order": [{"name": "Camera"}],
     "transitions": [],
     "groups": [],
     "quick_transitions": [],
@@ -10,7 +10,7 @@
         {
             "id": "scene",
             "versioned_id": "scene",
-            "name": "R50",
+            "name": "Camera",
             "uuid": "754fe105-6c4a-40cb-b9b1-0fcf08f9bf89",
             "enabled": true,
             "settings": {
@@ -18,7 +18,7 @@
                 "custom_size": false,
                 "items": [
                     {
-                        "name": "R50 USB",
+                        "name": "Camera USB",
                         "source_uuid": "a89fbddc-4680-44d8-98e3-4a19945ba3dc",
                         "id": 1,
                         "visible": true,
@@ -38,7 +38,7 @@
         {
             "id": "ffmpeg_source",
             "versioned_id": "ffmpeg_source",
-            "name": "R50 USB",
+            "name": "Camera USB",
             "uuid": "a89fbddc-4680-44d8-98e3-4a19945ba3dc",
             "enabled": true,
             "settings": {

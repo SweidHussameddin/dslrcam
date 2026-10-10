@@ -1,12 +1,13 @@
 #!/bin/zsh
-# install.sh — set up r50cam on a Mac: deps, scripts, OBS profile/scene, obs-websocket, auto-start LaunchAgent.
-# Safe to re-run (updates scripts/config in place).
+# install.sh — set up dslrcam on a Mac: deps, scripts, config, OBS profile/scene, obs-websocket, auto-start LaunchAgent.
+# Safe to re-run (updates scripts/OBS config in place, keeps your ~/.config/dslrcam/config).
 set -eu
 
 REPO=${0:A:h}
 BIN=~/.local/bin
+CONF_DIR=~/.config/dslrcam
 OBS_DIR=~/Library/Application\ Support/obs-studio
-AGENT=local.r50cam-watch
+AGENT=local.dslrcam-watch
 AGENT_PLIST=~/Library/LaunchAgents/$AGENT.plist
 
 [[ $(uname) == Darwin ]] || { echo "macOS only"; exit 1; }
@@ -17,20 +18,24 @@ echo "==> dependencies"
 command -v gphoto2 >/dev/null || brew install gphoto2
 [[ -d /Applications/OBS.app ]] || brew install --cask obs
 
-echo "==> stopping any running r50cam / OBS (OBS rewrites its config on exit)"
-[[ -x $BIN/r50cam ]] && $BIN/r50cam disable >/dev/null 2>&1 || true
+echo "==> stopping any running dslrcam / OBS (OBS rewrites its config on exit)"
+[[ -x $BIN/dslrcam ]] && $BIN/dslrcam disable >/dev/null 2>&1 || true
 pkill -x OBS 2>/dev/null && sleep 2 || true
 
 echo "==> scripts → $BIN"
 mkdir -p $BIN
-install -m 755 $REPO/bin/r50cam $REPO/bin/r50cam-watch $REPO/bin/obs-vcam $BIN/
+install -m 755 $REPO/bin/dslrcam $REPO/bin/dslrcam-watch $REPO/bin/obs-vcam $BIN/
 
-echo "==> OBS profile + scene collection 'r50cam'"
-mkdir -p "$OBS_DIR/basic/profiles/r50cam" "$OBS_DIR/basic/scenes" "$OBS_DIR/plugin_config/obs-websocket"
-cp $REPO/obs/basic.ini "$OBS_DIR/basic/profiles/r50cam/basic.ini"
-cp $REPO/obs/r50cam.json "$OBS_DIR/basic/scenes/r50cam.json"
+echo "==> config → $CONF_DIR/config"
+mkdir -p $CONF_DIR
+[[ -f $CONF_DIR/config ]] || cp $REPO/config.example $CONF_DIR/config
 
-# user.ini: skip the first-run wizard, and no quit confirmation (it blocks r50cam stop).
+echo "==> OBS profile + scene collection 'dslrcam'"
+mkdir -p "$OBS_DIR/basic/profiles/dslrcam" "$OBS_DIR/basic/scenes" "$OBS_DIR/plugin_config/obs-websocket"
+cp $REPO/obs/basic.ini "$OBS_DIR/basic/profiles/dslrcam/basic.ini"
+cp $REPO/obs/dslrcam.json "$OBS_DIR/basic/scenes/dslrcam.json"
+
+# user.ini: skip the first-run wizard, and no quit confirmation (it blocks `dslrcam stop`).
 # obs-websocket: enable with password auth (obs-vcam reads the password from this file).
 python3 -I - "$OBS_DIR" <<'PY'
 import configparser, json, os, secrets, sys
@@ -72,9 +77,11 @@ launchctl bootstrap gui/$UID $AGENT_PLIST
 cat <<'EOF'
 
 Done. Next:
-  1. Plug in the R50 (USB-C) and switch it on — r50cam starts automatically within ~3 s.
+  1. Plug in the camera (USB), switch it on (video mode) — dslrcam starts automatically within a few seconds.
+     Check with: tail -f /tmp/dslrcam-watch.log /tmp/dslrcam.out
   2. First time only: macOS asks to approve the OBS camera extension →
      System Settings ▸ General ▸ Login Items & Extensions ▸ Camera Extensions ▸ enable "OBS Virtual Camera".
-     Then run `r50cam stop` (the watcher restarts it with the virtual camera active).
+     Then run `dslrcam stop` (the watcher restarts it with the virtual camera active).
   3. In FaceTime/Zoom/Meet pick "OBS Virtual Camera".
+Settings (camera model, vendor filter): ~/.config/dslrcam/config
 EOF
