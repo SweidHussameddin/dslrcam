@@ -1,0 +1,23 @@
+#!/bin/zsh
+# r50cam-watch — keeps r50cam running while the Canon EOS R50 is connected and switched on,
+# and stops it (incl. OBS) when the camera is unplugged or turned off.
+# Run by launchd: ~/Library/LaunchAgents/local.r50cam-watch.plist (toggle with `r50cam enable|disable`).
+set -u
+
+BIN=${0:A:h}
+
+camera_present() { ioreg -p IOUSB -w0 | grep -q 'Canon Digital Camera'; }
+r50cam_running() { pgrep -f 'bin/r50cam$' >/dev/null; }
+
+while true; do
+  if camera_present; then
+    if ! r50cam_running; then
+      echo "$(date '+%F %T') camera connected → starting r50cam"
+      "$BIN/r50cam" >>/tmp/r50cam.out 2>&1 &
+    fi
+  elif r50cam_running; then
+    echo "$(date '+%F %T') camera gone → stopping r50cam"
+    "$BIN/r50cam" stop
+  fi
+  sleep 3
+done

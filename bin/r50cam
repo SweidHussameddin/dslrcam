@@ -1,0 +1,71 @@
+#!/bin/zsh
+# r50cam — Canon EOS R50 as a webcam without EOS Webcam Utility.
+# gphoto2 USB live view (1024x576 MJPEG) → raw MJPEG over local TCP → OBS media source (scaled to 1080p) → OBS Virtual Camera.
+# No re-encode: MJPEG straight into OBS is ~1 s lower latency than the earlier H.264/UDP pipeline.
+# Usage: r50cam          start (Ctrl-C stops everything)
+#        r50cam stop     stop a running instance (auto-start restarts it while the camera is connected)
+#        r50cam enable   auto-start whenever the camera is plugged in and on (LaunchAgent r50cam-watch)
+#        r50cam disable  turn auto-start off and stop the stream
+set -u
+
+PORT=23050
+LOG=/tmp/r50cam.log
+
+stop_all() {
+  pkill -f 'gphoto2 --capture-movie' 2>/dev/null
+  pkill -f "nc 127.0.0.1 $PORT" 2>/dev/null
+  quit_obs
+}
+
+# OBS only honours its launch flags (--startvirtualcam etc.) on a fresh start.
+quit_obs() {
+  # AppleScript "quit" gets cancelled by OBS when minimized to tray; SIGTERM shuts it down cleanly.
+  pkill -x OBS 2>/dev/null || return 0
+  for _ in {1..20}; do pgrep -x OBS >/dev/null || return 0; sleep 0.25; done
+  pkill -9 -x OBS
+}
+
+AGENT=local.r50cam-watch
+AGENT_PLIST=~/Library/LaunchAgents/$AGENT.plist
+
+case ${1:-} in
+  stop)
+    pkill -f 'bin/r50cam$' 2>/dev/null
+    stop_all
+    exit 0 ;;
+  disable)  # stop auto-start on camera plug-in (r50cam-watch LaunchAgent) and stop the stream
+    launchctl bootout gui/$UID/$AGENT 2>/dev/null
+    pkill -f 'bin/r50cam$' 2>/dev/null
+    stop_all
+    echo "auto-start disabled"
+    exit 0 ;;
+  enable)
+    launchctl bootstrap gui/$UID $AGENT_PLIST 2>/dev/null || launchctl kickstart gui/$UID/$AGENT
+    echo "auto-start enabled — r50cam starts whenever the R50 is plugged in and on"
+    exit 0 ;;
+esac
+
+command -v gphoto2 >/dev/null || { echo "gphoto2 missing: brew install gphoto2"; exit 1; }
+
+# macOS's PTP daemon grabs the camera exclusively (so would Canon's EOS Webcam Utility, if reinstalled).
+pkill -x ptpcamerad 2>/dev/null
+sleep 0.5
+gphoto2 --auto-detect | grep -q 'EOS R50' || { echo "R50 not detected — USB cable connected, camera on?"; exit 1; }
+
+trap 'echo; echo "stopping r50cam"; stop_all; exit 0' INT TERM
+
+quit_obs
+open -a OBS --args --collection r50cam --profile r50cam --startvirtualcam --minimize-to-tray --disable-updater --disable-shutdown-check
+# --startvirtualcam is unreliable on macOS (camera extension activates async), so also start it via obs-websocket.
+sleep 3
+"${0:A:h}/obs-vcam" start || echo "warning: could not start OBS Virtual Camera — start it from the OBS window"
+
+echo "r50cam running → select 'OBS Virtual Camera' in your app. Ctrl-C to stop. Log: $LOG"
+while true; do
+  pkill -x ptpcamerad 2>/dev/null
+  # OBS's media source listens on tcp://127.0.0.1:$PORT (input_format mjpeg); nc fails fast if OBS isn't ready yet.
+  gphoto2 --set-config /main/capturesettings/liveviewsize=Large --capture-movie --stdout 2>>"$LOG" |
+    nc 127.0.0.1 $PORT 2>>"$LOG"
+  echo "$(date '+%T') stream dropped, restarting…" | tee -a "$LOG"
+  sleep 2
+done
