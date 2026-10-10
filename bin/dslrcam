@@ -45,8 +45,9 @@ detect_camera() {
   local line
   line=$(gphoto2 --auto-detect 2>/dev/null | tail -n +3 | grep -v -i '^apple' | grep -i -F -- "$CAMERA_MODEL" | head -1)
   [[ -n $line ]] || return 1
-  CAM_PORT=$(print -r -- "$line" | grep -oE 'usb:[0-9,]+$')
-  CAM_MODEL=$(print -r -- "$line" | sed -E 's/[[:space:]]+usb:[0-9,]+$//')
+  # gphoto2 pads the port column with trailing spaces
+  CAM_PORT=$(print -r -- "$line" | grep -oE 'usb:[0-9,]+')
+  CAM_MODEL=$(print -r -- "$line" | sed -E 's/[[:space:]]+usb:[0-9,]+[[:space:]]*$//')
   [[ -n $CAM_PORT && -n $CAM_MODEL ]]
 }
 
